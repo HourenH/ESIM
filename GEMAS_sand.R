@@ -135,6 +135,7 @@ source("ESLFns.R")
 ## 2.1 10-fold CV for MSE and MSPE ----
 MSE_LS_cv <- MSPE_LS_cv <- MSE_ESL_cv <- MSPE_ESL_cv <- MSE_FSIM_cv <- MSPE_FSIM_cv <- MSE_SIQR_cv <- MSPE_SIQR_cv <- rep(0, 10)
 theta_LS.cv <- theta_ESL.cv <- theta_FSIM.cv <- theta_SIQR.cv <- matrix(0, nrow = 10, ncol = ncol(X))
+colnames(theta_LS.cv)= colnames(theta_ESL.cv) = colnames(theta_FSIM.cv) = colnames(theta_SIQR.cv) = colnames(X)
 h_LS.cv <- h_ESL.cv <- h_FSIM.cv <- h_SIQR.cv <- lambda.cv <- rep(0,10)
 p = dim(X)[2]
 n = nrow(X)
@@ -213,12 +214,12 @@ for (fold in 1:10) {
                           lprq_mul, x = SIQR_index, y = Y_train, h = h_SIQR.cv[fold])
     SIQR.predict = t(apply(SIQR.predict, 2, SpheNormalize))
     MSPE_SIQR_cv[fold] = mean(acos(rowSums(SIQR.predict * Y_test))^2, na.rm = T)
+    
+    ## save cv results
+    save.image("./data/GEMAS_sand.Rdata")
 }
 
 
-## save cv results
-colnames(theta_LS.cv)= colnames(theta_ESL.cv) = colnames(theta_FSIM.cv) = colnames(theta_SIQR.cv) = colnames(X)
-save.image("./data/GEMAS_sand.Rdata")
 
 ## 2.2 model with full samples ----
 # fit ESIM(LS)
@@ -265,7 +266,6 @@ SIQR_mu = sapply(1:length(SIQR_index), function(r){
 SIQR_mu = t(apply(SIQR_mu, 2, SpheNormalize))
 MSE_SIQR = mean(acos(rowSums(SIQR_mu * Y))^2, na.rm = T)
 
-
 result = matrix(c(theta_LS, h_LS, MSE_LS, 
                   theta_ESL, h_ESL, MSE_ESL,
                   theta_FSIM, h_FSIM, MSE_FSIM,
@@ -278,6 +278,7 @@ save.image("./data/GEMAS_sand.Rdata")
 ## 2.3 Bootstrap for SE of LS and ESL ----
 nIter = 500
 b_ESL.boot = b_LS.boot = matrix(0, nrow = nIter, ncol = ncol(X))
+colnames(b_LS.boot) = colnames(b_ESL.boot) = colnames(X)
 h_ESL.boot = h_LS.boot = rep(0, nIter)
 
 set.seed(100)
@@ -292,9 +293,9 @@ for (b in 1:nIter) {
     w = n * w / sum(w)
     ESL_boot = esl_index_bw(theta_init = ESL$theta, bw_init = ESL$bw, xdat = X, ydat = Y, lambda = ESL$lambda, w = w)
     b_ESL.boot[b,] = ESL_boot$theta; h_ESL.boot[b] = ESL_boot$bw
+    save.image("./data/GEMAS_sand.Rdata")
 }
-colnames(b_LS.boot) = colnames(b_ESL.boot) = colnames(X)
-save.image("./data/GEMAS_sand.Rdata")
+
 
 
 ## 2.4 summary stats ----
