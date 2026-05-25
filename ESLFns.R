@@ -50,6 +50,33 @@ ll_LS <- function(txdat, tydat, exdat, bw){
     return(c(mu,mudev))
 }
 
+#' Compute weighted extrinsic local linear regression using least squares.
+#'
+#' @param txdat A numeric vector of length n, the index value \eqn{theta^\top X}.
+#' @param tydat An n by d matrix of response vectors, each row a d-dimensional unit vector.
+#' @param exdat A numeric scaler, the evaluation point.
+#' @param bw A positive numeric number, the bandwidth for the local linear regression.
+#' @param weight A numeric vector of length n, the observation weights.
+#'
+#' @returns A numeric vector of length 2d.
+#' The leading d components are the estimate of the local linear regression at exdat, and the last d components the estimate of its first derivative.
+#'
+#' @export
+#'
+#' @examples
+ll_LS_weight <- function(txdat, tydat, exdat, bw, weight){
+    K = dnorm((txdat - exdat)/bw) * weight / bw 
+    s0 = mean(K)
+    s1 = mean(K * (txdat - exdat))
+    s2 = mean(K * (txdat - exdat)^2)
+    
+    mu_weight = ((s2 - s1*(txdat - exdat))/(s2*s0 - s1^2)) * K
+    mudev_weight = ((s1 - s0*(txdat - exdat))/(s1^2-s2*s0)) * K
+    
+    mu = colMeans(tydat * matrix(rep(mu_weight, ncol(tydat)), ncol = ncol(tydat)))
+    mudev = colMeans(tydat * matrix(rep(mudev_weight, ncol(tydat)), ncol = ncol(tydat)))
+    return(c(mu,mudev))
+}
 
 #' Cost function of the extrinsic single index model using the least squares.
 #'
@@ -380,6 +407,85 @@ esl_est <- function(theta_init, bw_init, xdat, ydat, delta){
          lambda = lambda_update, psi = result_update$psi)
 }
 
+#' Weighted cost function of the extrinsic single-index model using least squares.
+#'
+#' @param param A numeric vector of length (p+1), the first component is the bandwidth and the remaining components are the parameter coefficients.
+#' @param xdat An n by p matrix, the p-dimensional covariates.
+#' @param ydat An n by d matrix of response vectors, each row a d-dimensional unit vector.
+#' @param weight A numeric vector of length n, the observation weights for the weighted least squares objective.
+#'
+#' @returns Scalar, the weighted loss value.
+cost_ESIM_weight<- function(param, xdat, ydat, weight){
+    MaxPanelty = .Machine$double.xmax
+    K = dnorm # kernel function
+    dx = ncol(xdat); dy = ncol(ydat)
+    n = nrow(xdat)
+    
+    if(dx != (length(param)-1)){
+        stop("xdat has different dimensions with param.")
+    }
+    
+    bw = param[1] # bandwidth
+    
+    theta = param[-1]
+    theta = sign(theta[1]) * SpheNormalize(theta) # parametric coefficients
+    
+    index_ = xdat %*% theta
+    
+    bw_range = SetBwRange(xin = index_, xout = index_, kernel_type = "gauss")# avoid small or negative bandwidth
+    if(bw>bw_range$max || bw < bw_range$min){return(.Machine$double.xmax)}
+    
+    # leave one out local linear of mu and first derivative
+    llmu = sapply(1:n, function(r_){
+        ll_LS_weight(txdat = index_[-r_], tydat = ydat[-r_,], exdat = index_[r_], bw, weight = weight[-r_])
+    })
+    llmu = t(llmu)[,1:dy]
+    # objective value
+    if (any(is.nan(llmu))) {return(.Machine$double.xmax)}
+    sum(weight * (ydat - llmu)^2)
+    
+}
+
+#' Weighted estimation of the extrinsic single-index model using least squares.
+#'
+#' This function estimates the parameter coefficients \eqn{\theta} and the bandwidth
+#' for an extrinsic single-index model using a weighted leave-one-out local linear regression
+#' with the least squares loss.
+#'
+#' @param param A numeric of length (p+1). The first component is the initial value of the bandwidth and the remaining components are the initial value of the parametric coefficients.
+#' @param xdat An n by p matrix, the p-dimensional covariates.
+#' @param ydat An n by d matrix of response vectors, each row a d-dimensional unit vector.
+#' @param weight A numeric vector of length n, the observation weights for the weighted least squares objective.
+#'
+#' @returns A list containing:
+#' \describe{
+#'   \item{theta}{Estimated parameter coefficients, normalized to have unit length and a positive leading component.}
+#'   \item{bw}{Estimated bandwidth for local linear regression.}
+#'   \item{mu}{An n by d matrix of leave-one-out weighted local linear regression estimates of the response.}
+#'   \item{mudev}{An n by d matrix of leave-one-out estimates of the derivative of the regression function.}
+#' }
+#'
+#' @export
+#'
+#' @examples
+ls_est_weight <- function(param, xdat, ydat, weight){
+    dy = ncol(ydat)
+    est = optim(param, cost_ESIM_weight, xdat = xdat, ydat = ydat, weight = weight)
+    
+    
+    bw = est$par[1]
+    theta = est$par[-1]
+    theta = sign(theta[1]) * SpheNormalize(theta)
+    
+    index = xdat %*% theta
+    llmu = t(sapply(1:nrow(xdat), function(r_){
+        ll_LS_weight(txdat = index[-r_], tydat = ydat[-r_,], exdat = index[r_], bw, weight = weight[-r_])}))
+    mu = llmu[,1:dy]
+    mudev = llmu[,(dy+1):(2*dy)]
+    
+    return(list(theta = theta, bw = bw, mu = mu, mudev = mudev))
+}
+
 # LOO local linear regression to determine the optimal bandwidth
 bwConExp <- function(xdat, ydat){
     # given index value (xdat), compute the optimal bandwidth
@@ -655,6 +761,7 @@ fsim_est <- function(xdat, ydat, init = NULL, kernel = "gauss"){
                                                             optns=list(kernel=kernel, bw = bw_update))}))
     return(list(theta = theta_update, bw = bw_update, mu = mu_hat))
 }
+
 ###########################################################
 # The implementation of ESIM with ell_1 loss (SIQR)
 ###########################################################
@@ -690,9 +797,25 @@ ll_median <- function(txdat, tydat, exdat, bw){
 }
 
 
+#' Compute a local linear quantile fit at one index value.
+#'
+#' This helper is used in Step 1 of the SIQR algorithm to estimate the
+#' component-wise link function value and derivative at a single evaluation
+#' point.
+#'
+#' @param x Numeric vector of length n, the leave-one-out index values.
+#' @param y Numeric vector of length n, the leave-one-out response values for one component.
+#' @param h Positive numeric scalar, bandwidth for the local quantile fit.
+#' @param tau Numeric scalar in (0, 1), quantile level. Defaults to 0.5.
+#' @param x0 Numeric scalar, the evaluation point.
+#'
+#' @returns A list with entries:
+#'  - `x0`: the evaluation point
+#'  - `fv`: fitted conditional quantile at `x0`
+#'  - `dv`: local linear derivative estimate at `x0`
+#'
 lprq0<-function (x, y, h, tau = 0.5, x0)  #used in step 1 of the algorithm
 {
-    require(quantreg)
     fv <- x0
     dv <- x0
     
@@ -704,105 +827,146 @@ lprq0<-function (x, y, h, tau = 0.5, x0)  #used in step 1 of the algorithm
     list(x0 = x0, fv = fv, dv = dv)
 }
 
+#' Compute component-wise local constant quantile fits.
+#'
+#' Each column of the multivariate response is fitted separately at the same
+#' evaluation point. A scalar bandwidth is recycled across all response
+#' components; a vector bandwidth uses one bandwidth per component.
+#'
+#' @param x0 Numeric scalar, the evaluation point.
+#' @param x Numeric vector of length n, the index values.
+#' @param y Numeric n by d matrix, each column a response component.
+#' @param h Positive numeric scalar or length-d vector, bandwidth value(s).
+#' @param tau Numeric scalar in (0, 1), quantile level. Defaults to 0.5.
+#'
+#' @returns Numeric vector of length d, the fitted quantile for each response component.
+#'
 lprq_mul <- function(x0, x, y, h, tau = 0.5){
     z <- x - x0
-    wx <- dnorm(z/h)
+    if(length(h) == 1){
+        h <- rep(h, ncol(y))
+    }
     fv = NULL
     for (col_ in 1:ncol(y)) {
+        wx <- dnorm(z/h[col_])
         r <- rq(y[,col_]~1, weights = wx, tau = tau, ci=FALSE)
         fv = c(fv, r$coef[1])
     }
     fv
 }
 
+#' Estimate the common single-index coefficient using SIQR.
+#'
+#' This implements the Wu (2010) iterative single-index quantile regression
+#' update with a multivariate response. The same index coefficient is shared
+#' across all response components, while the local link function estimates are
+#' computed component-wise using a common bandwidth. The Step 2 quantile regression stacks
+#' the pseudo-observations over all response components so that the objective
+#' sums the component-wise quantile losses.
+#'
+#' @param y Numeric n by d matrix, the multivariate response.
+#' @param xx Numeric n by p matrix, the predictors.
+#' @param tau Numeric scalar in (0, 1), quantile level.
+#' @param gamma0 Numeric vector of length p, initial index coefficient.
+#' @param maxiter Positive integer, maximum number of iterations.
+#' @param crit Positive numeric scalar, convergence tolerance for squared coefficient change.
+#'
+#' @returns A list with entries:
+#'  - `theta`: normalized estimated common index coefficient
+#'  - `bw`: positive numeric scalar, bandwidth from the last successful update
+#'  - `flag.conv`: logical value indicating whether the iteration ended without hitting `maxiter`
+#'
 index.gamma<-function (y, xx, tau, gamma0, maxiter,crit) 
 {
-    flag.conv<-0; #flag whether maximum iteration is achieved
+    flag.conv<-0 #flag whether maximum iteration is achieved
     
-    gamma.new<-gamma0; #starting value
-    gamma.new<-sign(gamma.new[1])*gamma.new/sqrt(sum(gamma.new^2));
+    y <- as.matrix(y)
+    xx <- as.matrix(xx)
     
-    n<-NROW(y); p<-NCOL(xx); 
-    a<-rep(0,n); b<-rep(0,n); #h<-rep(0,n);
+    gamma.new<-gamma0 #starting value
+    gamma.new<-sign(gamma.new[1])*gamma.new/sqrt(sum(gamma.new^2))
     
-    iter<-1;
-    gamma.old<-2*gamma.new;
-    bw.old <- 2;
-    #gamma.old<-sign(gamma.old[1])*gamma.old/sqrt(sum(gamma.old^2));
+    n<-NROW(y); p<-NCOL(xx); d<-NCOL(y)
+    
+    iter<-1
+    gamma.old<-2*gamma.new
+    bw.old <- 2
+    update.ok <- TRUE
     
     while((iter < maxiter) & (sum((gamma.new-gamma.old)^2)>crit))
     {
-        gamma.old<-gamma.new;
-        gamma.new = matrix(rep(gamma.new, 3), p, 3)
-        iter<-iter+1;
-        tryCatch({
+        gamma.old<-gamma.new
+        iter<-iter+1
+        update.ok <- tryCatch({
         x = xx %*% t(t(gamma.old))
-        hm = apply(y, 2, dpill, x=x)
-        hp = mean(hm, na.rm = T)*(tau*(1-tau)/(dnorm(qnorm(tau)))^2)^.2;
+        bw.candidate <- sapply(seq_len(d), function(col_){
+            tryCatch(
+                KernSmooth::dpill(as.vector(x), y[,col_]) *
+                    (tau*(1-tau)/(dnorm(qnorm(tau)))^2)^.2,
+                error = function(e) NA_real_
+            )
+        })
+        bw.fallback <- stats::sd(as.vector(x)) * n^(-1/5)
+        bw.new <- mean(bw.candidate, na.rm = TRUE)
+        if(is.na(bw.new)){
+            bw.new <- bw.fallback
+        }
         
-        for (col_ in 1:ncol(y)) {
+        y.stack <- numeric(n^2*d) # pseudo-observations used for step 2
+        x.stack <- matrix(0, nrow = n^2*d, ncol = p) # pseudo-observations used for step 2
+        w.stack <- numeric(n^2*d)
+        pair.i <- rep(seq_len(n), each = n)
+        pair.j <- rep(seq_len(n), times = n)
+        
+        for (col_ in 1:d) {
             ####################################
             #  step 1: compute a_j,b_j; j=1:n  #
             ####################################
-            a<-rep(0,n); b<-rep(0,n);#h<-rep(0,n);
+            ab.fit <- sapply(seq_len(n), function(j){
+                fit <- lprq0(x[-j], y[-j,col_], bw.new, tau, x[j])
+                c(fit$fv, fit$dv)
+            })
+            a <- ab.fit[1,]
+            b <- ab.fit[2,]
             
-            x0<-0;
-            for(j in 1:n)
-            {  
-                x0<-x[j];
-                fit<-lprq0(x, y[,col_], hp, tau, x0) 
-                a[j]<-fit$fv;
-                b[j]<-fit$dv;
-            }
+            ############################################################# 
+            # Build Wu's pseudo-observations y*_ij and x*_ij for step 2 #
+            #############################################################
+            ynew <- y[pair.i, col_] - a[pair.j]
+            xnew <- (xx[pair.i,,drop = FALSE] - xx[pair.j,,drop = FALSE]) * b[pair.j]
             
-            ############################# 
-            # step 2: compute gamma.new #
-            #############################
-            # here, let v_j=1/n;
-            ynew<-rep(0,n^2);
-            xnew<-rep(0,n^2*p);
-            xnew<-matrix(xnew,ncol=p);
-            
-            for (i in 1:n)
-            { for (j in 1:n)
-            { ynew[(i-1)*n+j]<-y[i,col_]-a[j];
-            for(jj in 1:p){ xnew[(i-1)*n+j,jj]<-b[j]*(xx[i,jj]-xx[j,jj]);}
-            } 
-            } 
-            
-            xg<-xnew%*%t(t(gamma.old))
-            xgh<-rep(0,n^2); #x*gamma/h
-            for (i in 1:n)
-            {   for (j in 1:n)
-            { 
-                xgh[(i-1)*n+j]<-xg[(i-1)*n+j]/hp;   
-            } 
-            } 
-            wts<-dnorm(xgh);
-            #fit<-rq(ynew ~0+ xnew, weights = wts, tau = p, method="fn") ; #pfn for very large problems
-            fit <- rq(ynew ~0+ xnew, weights = wts, tau = tau, ci = FALSE) ; #default: br method, for several thousand obs
-            # 0, to exclude intercept
-            gamma.new[,col_] = fit$coef
-            gamma.new[,col_] = sign(gamma.new[1,col_]) * gamma.new[,col_] /sqrt(sum(gamma.new[,col_]^2))
-            bw.old = hp
+            # Weights are evaluated at the previous gamma estimate and current bandwidth.
+            index.diff <- as.vector((xx[pair.i,,drop = FALSE] - xx[pair.j,,drop = FALSE]) %*% gamma.old)
+            wts <- dnorm(index.diff/bw.new)/bw.new
+            idx <- ((col_-1)*n^2+1):(col_*n^2)
+            y.stack[idx] <- ynew
+            x.stack[idx,] <- xnew
+            w.stack[idx] <- wts
         }
+        # filter for valid pseudo-observations
+        keep <- is.finite(y.stack) & is.finite(w.stack) & w.stack > 0 &
+            apply(is.finite(x.stack), 1, all)
+        if(sum(keep) <= p){
+            warning("Too few valid pseudo-observations for gamma update.")
+        }
+        fit <- rq(y.stack[keep]~0+x.stack[keep,], weights = w.stack[keep],
+                  tau = tau, method = "fn") ; #fn for very large problems and `0` to exclude intercept
+        gamma.new <- as.numeric(fit$coef)
+        bw.old <- bw.new
+        TRUE
         }, error = function(e){
             print(paste("Error occurred in iteration", iter))
-            NULL
+            FALSE
         })
-
+        if(!update.ok){break}
         
-        gamma.new<-rowMeans(gamma.new);
-        gamma.new<-sign(gamma.new[1])*gamma.new/sqrt(sum(gamma.new^2));   #normalize
+        gamma.new<-sign(gamma.new[1])*gamma.new/sqrt(sum(gamma.new^2))   #normalize
         
-    } #end iterates over iter;
+    }
     
-    iter<-iter;
-    
-    flag.conv<-(iter < maxiter) ;# = 1 if converge; =0 if not converge
-    #flag.conv<- 1- ((iter=maxiter)&(sum((gamma.new-gamma.old)^2)<crit))
-    
-    gamma<-gamma.new;
+    iter<-iter
+    flag.conv <- update.ok && iter < maxiter # = 1 if converge; =0 if not converge
+    gamma<-gamma.new
     list(theta=gamma, bw = bw.old, flag.conv=flag.conv)
 }
 
@@ -1006,65 +1170,63 @@ simProject=function(kappa,V,mu,a1,n){
 
 
 
-#################
-#  Lin          #
-#################
-Lin_est <- function(xdat, ydat){
-    # LOOCV
-    dx = ncol(xdat)
-    dy = ncol(ydat)
-    n = nrow(ydat)
-    h0 = rep(0.2, dx)
-    
-    flag = FALSE
-    while (flag!=TRUE) {
-        tryCatch({
-            flag = TRUE
-            optim.bw = optim(par=h0, fn=function(bw){
-                fit = sapply(1:dy, function(col){
-                    np::npksum(txdat=xdat, tydat = ydat[,col], bws = bw, leave.one.out=T)$ksum/
-                        np::npksum(txdat=xdat, bws = bw, leave.one.out=T)$ksum})
-                if(any(is.na(fit))){return(9999)}
-                fit = t(apply(fit, 1, function(x){x/sqrt(sum(x^2))}))
-                h0 = runif(dx, 0.5, 1.5) * h0
-                sum(sapply(1:n, function(i){acos(sum(fit[i,]*ydat[i,]))}))
-            },
-            method = "L-BFGS-B", lower = rep(0.01,d), upper = rep(1.5, d)
-            )}, 
-            error=function(e){
-                flag = FALSE
-                warning("Optim error!")
-            })
-    }
-    out = sapply(1:dy, function(col){
-        np::npksum(txdat=xdat, tydat = ydat[,col], bws = optim.bw$par, leave.one.out=T)$ksum/
-            np::npksum(txdat=xdat, bws = optim.bw$par, leave.one.out=T)$ksum})
-    out = t(apply(out, 1, function(x){x/sqrt(sum(x^2))}))
-    return(list("bw"=optim.bw$par, "fit"=out))
-}
 
-Lin_fit <- function(xdat, ydat, xtest, h, K=dnorm){
-    # input: 
-    #       xdat, xtest, ydat: n by dx/dy
-    #       h: dx by 1 bandwidth
-    #       output: n by dy matrix
-    if (ncol(xdat)!=length(h)) {
-        stop("dimensions of xdat should be the same as length of h")
-    }
-    dy = ncol(ydat)
-    fit = matrix(0, nrow = nrow(xtest), ncol = dy)
-    for (i in 1:nrow(xtest)) {
-        Kx = t(apply(xdat, 1, function(x){K((x-xtest[i,])/h)/h}))
-        Ki = apply(Kx, 1, prod)
-        sumK = sum(Ki)
-        Ki = Ki/sumK
-        Ky = t(apply(cbind(ydat,Ki), 1, function(x){x[dy+1]*x[1:dy]}))
-        fit[i,] = colSums(Ky)
-    }
-    ## normalization
-    fit.norm = t(apply(fit, 1,function(x){x/sqrt(sum(x^2))}))
-    return(fit.norm)
-}
+# Lin_est <- function(xdat, ydat){
+#     # LOOCV
+#     dx = ncol(xdat)
+#     dy = ncol(ydat)
+#     n = nrow(ydat)
+#     h0 = rep(0.2, dx)
+#     
+#     flag = FALSE
+#     while (flag!=TRUE) {
+#         tryCatch({
+#             flag = TRUE
+#             optim.bw = optim(par=h0, fn=function(bw){
+#                 fit = sapply(1:dy, function(col){
+#                     np::npksum(txdat=xdat, tydat = ydat[,col], bws = bw, leave.one.out=T)$ksum/
+#                         np::npksum(txdat=xdat, bws = bw, leave.one.out=T)$ksum})
+#                 if(any(is.na(fit))){return(9999)}
+#                 fit = t(apply(fit, 1, function(x){x/sqrt(sum(x^2))}))
+#                 h0 = runif(dx, 0.5, 1.5) * h0
+#                 sum(sapply(1:n, function(i){acos(sum(fit[i,]*ydat[i,]))}))
+#             },
+#             method = "L-BFGS-B", lower = rep(0.01,d), upper = rep(1.5, d)
+#             )}, 
+#             error=function(e){
+#                 flag = FALSE
+#                 warning("Optim error!")
+#             })
+#     }
+#     out = sapply(1:dy, function(col){
+#         np::npksum(txdat=xdat, tydat = ydat[,col], bws = optim.bw$par, leave.one.out=T)$ksum/
+#             np::npksum(txdat=xdat, bws = optim.bw$par, leave.one.out=T)$ksum})
+#     out = t(apply(out, 1, function(x){x/sqrt(sum(x^2))}))
+#     return(list("bw"=optim.bw$par, "fit"=out))
+# }
+# 
+# Lin_fit <- function(xdat, ydat, xtest, h, K=dnorm){
+#     # input: 
+#     #       xdat, xtest, ydat: n by dx/dy
+#     #       h: dx by 1 bandwidth
+#     #       output: n by dy matrix
+#     if (ncol(xdat)!=length(h)) {
+#         stop("dimensions of xdat should be the same as length of h")
+#     }
+#     dy = ncol(ydat)
+#     fit = matrix(0, nrow = nrow(xtest), ncol = dy)
+#     for (i in 1:nrow(xtest)) {
+#         Kx = t(apply(xdat, 1, function(x){K((x-xtest[i,])/h)/h}))
+#         Ki = apply(Kx, 1, prod)
+#         sumK = sum(Ki)
+#         Ki = Ki/sumK
+#         Ky = t(apply(cbind(ydat,Ki), 1, function(x){x[dy+1]*x[1:dy]}))
+#         fit[i,] = colSums(Ky)
+#     }
+#     ## normalization
+#     fit.norm = t(apply(fit, 1,function(x){x/sqrt(sum(x^2))}))
+#     return(fit.norm)
+# }
 
 # cost_ESIM <- function(param, xdat, ydat){
 #  extrinsic single-index model using the local constant.
@@ -1108,90 +1270,90 @@ Lin_fit <- function(xdat, ydat, xtest, h, K=dnorm){
 #     return(val)
 # }
 
-cost_ESIMsep <- function(param, xdat, ydat){
-    # fit separately
-    MaxPanelty = .Machine$double.xmax
-    ## verify dimension of xdat, ydat
-    K=dnorm
-    ydat <- t(t(ydat))
-    xdat <- t(t(xdat))
-    dx = ncol(xdat)
-    dy = ncol(ydat)
-    n = nrow(xdat)
-    
-    h = param[1:dy]
-    beta = param[(dy+1):length(param)]
-    beta = sign(beta[1])*beta/sqrt(sum(beta^2)) # standardize
-    
-    if (dx!=(length(beta))){
-        stop("xdat has different dimensions with param")
-    }
-    if (length(h)!= dy) {
-        stop("ydat has different dimensions with h")
-    }
-    
-    index = xdat %*% t(t(beta))
-    if ((min(h)>1e-2) && (max(h)<=1.5)) {
-        fit = sapply(1:dy, function(col){
-            np::npksum(txdat=index, tydat = ydat[,col], bws = h[col], leave.one.out=T)$ksum/
-                np::npksum(txdat=index, bws = h[col], leave.one.out=T)$ksum
-        })
-        if(any(is.na(fit))){
-            val = MaxPanelty
-        } else {
-            val = sum(apply(ydat-fit, 1, function(x){sum(x^2)}))
-        }
-    } else {
-        val = MaxPanelty
-    }
-    
-    return(val)
-}
-
-
-# input:
-#   xdat: n*1, index value for training
-#   ydat: n*d, response for training
-#   exdat: scalar
-#   bw: scalar, bandwidth
-# output: d*1, fitted value at exdat
-ESIM_fit <- function(xdat, ydat, exdat, bw){
-    d = ncol(ydat)
-    weight = matrix(rep(dnorm((xdat - exdat)/bw)/bw, d), ncol = d)
-    fit = colSums( ydat * weight )/ sum(weight[,1])
-    ## NA value?
-    return(fit)
-}
-
-ESIMsep_fit <- function(xdat, ydat, xtest, h, K=dnorm, pred=TRUE){
-    # input: 
-    #        xdat, xtest: n by 1 vector, index values
-    #        ydat: n by p matrix
-    #        h: bandwidth for each component of y
-    # output: ntest by p matrix
-    if (ncol(ydat)!= length(h)) {
-        stop("dimension of ydat should be the same as length of h when fitting single index model separately.")
-    }
-    fit = matrix(0, nrow = nrow(xtest), ncol = ncol(ydat))
-    for (i in 1:nrow(xtest)) {
-        if (pred==FALSE) {
-            df = xdat[-i] - xtest[i]
-            Y_ = ydat[-i,]
-        } else {
-            df = xdat - xtest[i]
-            Y_ = ydat
-        }
-        # d = df/max(abs(df))
-        d = df
-        Kx = sapply(h, function(hi){K(d/hi)/hi})
-        Ki = apply(Kx,2,function(x){x/sum(x)})
-        Ky = t(sapply(1:nrow(Y_), function(x){Y_[x,]*Ki[x,]}))
-        fit[i,] = colSums(Ky)
-    }
-    ## normalization
-    fit.norm = t(apply(fit, 1,function(x){x/sqrt(sum(x^2))}))
-    return(fit.norm)
-}
+# cost_ESIMsep <- function(param, xdat, ydat){
+#     # fit separately
+#     MaxPanelty = .Machine$double.xmax
+#     ## verify dimension of xdat, ydat
+#     K=dnorm
+#     ydat <- t(t(ydat))
+#     xdat <- t(t(xdat))
+#     dx = ncol(xdat)
+#     dy = ncol(ydat)
+#     n = nrow(xdat)
+#     
+#     h = param[1:dy]
+#     beta = param[(dy+1):length(param)]
+#     beta = sign(beta[1])*beta/sqrt(sum(beta^2)) # standardize
+#     
+#     if (dx!=(length(beta))){
+#         stop("xdat has different dimensions with param")
+#     }
+#     if (length(h)!= dy) {
+#         stop("ydat has different dimensions with h")
+#     }
+#     
+#     index = xdat %*% t(t(beta))
+#     if ((min(h)>1e-2) && (max(h)<=1.5)) {
+#         fit = sapply(1:dy, function(col){
+#             np::npksum(txdat=index, tydat = ydat[,col], bws = h[col], leave.one.out=T)$ksum/
+#                 np::npksum(txdat=index, bws = h[col], leave.one.out=T)$ksum
+#         })
+#         if(any(is.na(fit))){
+#             val = MaxPanelty
+#         } else {
+#             val = sum(apply(ydat-fit, 1, function(x){sum(x^2)}))
+#         }
+#     } else {
+#         val = MaxPanelty
+#     }
+#     
+#     return(val)
+# }
+# 
+# 
+# # input:
+# #   xdat: n*1, index value for training
+# #   ydat: n*d, response for training
+# #   exdat: scalar
+# #   bw: scalar, bandwidth
+# # output: d*1, fitted value at exdat
+# ESIM_fit <- function(xdat, ydat, exdat, bw){
+#     d = ncol(ydat)
+#     weight = matrix(rep(dnorm((xdat - exdat)/bw)/bw, d), ncol = d)
+#     fit = colSums( ydat * weight )/ sum(weight[,1])
+#     ## NA value?
+#     return(fit)
+# }
+# 
+# ESIMsep_fit <- function(xdat, ydat, xtest, h, K=dnorm, pred=TRUE){
+#     # input: 
+#     #        xdat, xtest: n by 1 vector, index values
+#     #        ydat: n by p matrix
+#     #        h: bandwidth for each component of y
+#     # output: ntest by p matrix
+#     if (ncol(ydat)!= length(h)) {
+#         stop("dimension of ydat should be the same as length of h when fitting single index model separately.")
+#     }
+#     fit = matrix(0, nrow = nrow(xtest), ncol = ncol(ydat))
+#     for (i in 1:nrow(xtest)) {
+#         if (pred==FALSE) {
+#             df = xdat[-i] - xtest[i]
+#             Y_ = ydat[-i,]
+#         } else {
+#             df = xdat - xtest[i]
+#             Y_ = ydat
+#         }
+#         # d = df/max(abs(df))
+#         d = df
+#         Kx = sapply(h, function(hi){K(d/hi)/hi})
+#         Ki = apply(Kx,2,function(x){x/sum(x)})
+#         Ky = t(sapply(1:nrow(Y_), function(x){Y_[x,]*Ki[x,]}))
+#         fit[i,] = colSums(Ky)
+#     }
+#     ## normalization
+#     fit.norm = t(apply(fit, 1,function(x){x/sqrt(sum(x^2))}))
+#     return(fit.norm)
+# }
 
 # esl_est <- function(param, xdat, ydat, lambda, abstol=1e-4, maxiter=100){
 #     dist_ = 1e5

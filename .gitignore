@@ -1,0 +1,17 @@
+*.log
+*.aux
+*.bbl
+*.fls
+*.f*
+*.pdf
+*.DS_Store
+*.xml
+*.bcf
+*.blg
+*.out
+*.synctex.gz
+.Rproj.user
+.Rhistory
+*.thm
+/Gadi/
+/figures/
