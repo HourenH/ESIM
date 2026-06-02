@@ -16,25 +16,57 @@ rownames(Y) = NULL
 
 # 1.EDA ----
 ## 1.1 Soil textural composition ----
-# png("./figures/gemas/lon_comp.png", width = 500, height = 450)
-# par(mfrow=c(2,2), mar=c(4,5,2,1))
-# plot(gemas.FRA$longitude, Y[,1], ylim = c(0,1), xlab = "longitude", ylab = "Y", pch=1, cex.lab=1.5, cex.axis = 1.5)
-# points(gemas.FRA$longitude, Y[,2], col="blue", pch=2)
-# points(gemas.FRA$longitude, Y[,3], col="red", pch=3)
-# plot(gemas.FRA$longitude, Y[,1], ylim = c(0,1), xlab = "longitude", ylab = expression(Y[1]), pch=1, cex.lab=1.5, cex.axis = 1.5)
-# plot(gemas.FRA$longitude, Y[,2], ylim = c(0,1), xlab = "longitude", ylab = expression(Y[2]), pch=2, cex.lab=1.5, cex.axis = 1.5)
-# plot(gemas.FRA$longitude, Y[,3], ylim = c(0,1), xlab = "longitude", ylab = expression(Y[3]), pch=3, cex.lab=1.5, cex.axis = 1.5)
-# dev.off()
+png("./figures/gemas/lon_comp.png", width = 500, height = 450)
+par(mfrow=c(2,2), mar=c(4,5,2,1))
+plot(gemas.FRA$longitude, Y[,1], ylim = c(0,1), xlab = "longitude", ylab = "Y", pch=1, cex.lab=1.5, cex.axis = 1.5)
+points(gemas.FRA$longitude, Y[,2], col="blue", pch=2)
+points(gemas.FRA$longitude, Y[,3], col="red", pch=3)
+plot(gemas.FRA$longitude, Y[,1], ylim = c(0,1), xlab = "longitude", ylab = expression(Y[1]), pch=1, cex.lab=1.5, cex.axis = 1.5)
+points(gemas.FRA$longitude[207], Y[207,1], col = "red", pch = 1, cex = 2)
+text(gemas.FRA$longitude[207], Y[207,1], labels = "207", col = "red", font = 1.5, pos = 1, cex = 1.2)
 
-# png("./figures/gemas/lat_comp.png", width = 500, height = 450)
-# par(mfrow=c(2,2), mar=c(4,5,2,1))
-# plot(gemas.FRA$latitude, Y[,1], ylim = c(0,1), xlab = "latitude", ylab = "Y", pch=1, cex.lab=1.5, cex.axis = 1.5)
-# points(gemas.FRA$latitude, Y[,2], col="blue", pch=2)
-# points(gemas.FRA$latitude, Y[,3], col="red", pch=3)
-# plot(gemas.FRA$latitude, Y[,1], ylim = c(0,1), xlab = "latitude", ylab = expression(Y[1]), pch=1, cex.lab=1.5, cex.axis = 1.5)
-# plot(gemas.FRA$latitude, Y[,2], ylim = c(0,1), xlab = "latitude", ylab = expression(Y[2]), pch=2, cex.lab=1.5, cex.axis = 1.5)
-# plot(gemas.FRA$latitude, Y[,3], ylim = c(0,1), xlab = "latitude", ylab = expression(Y[3]), pch=3, cex.lab=1.5, cex.axis = 1.5)
-# dev.off()
+plot(gemas.FRA$longitude, Y[,2], ylim = c(0,1), xlab = "longitude", ylab = expression(Y[2]), pch=2, cex.lab=1.5, cex.axis = 1.5)
+points(gemas.FRA$longitude[c(22,205)], Y[c(22,205),2], col = "red", pch = 1, cex = 2)
+text(gemas.FRA$longitude[c(22,205)], Y[c(22,205),2], labels = c("22","205"), col = "red", font = 1.5, pos = 1, cex = 1.2)
+
+plot(gemas.FRA$longitude, Y[,3], ylim = c(0,1), xlab = "longitude", ylab = expression(Y[3]), pch=3, cex.lab=1.5, cex.axis = 1.5)
+points(gemas.FRA$longitude[c(22,23,28,41)], Y[c(22,23,28,41),3], col = "red", pch = 1, cex = 2)
+text(gemas.FRA$longitude[c(23,28)], Y[c(23,28),3], labels = c("23","28"), col = "red", font = 1.5, pos = 4, cex = 1.2)
+text(gemas.FRA$longitude[c(22,41)], Y[c(22,41),3], labels = c("22","41"), col = "red", font = 1.5, pos = 1, cex = 1.2)
+
+dev.off()
+
+png("./figures/gemas/lat_comp.png", width = 500, height = 450)
+par(mfrow=c(2,2), mar=c(4,5,2,1))
+plot(gemas.FRA$latitude, Y[,1], ylim = c(0,1), xlab = "latitude", ylab = "Y", pch=1, cex.lab=1.5, cex.axis = 1.5)
+points(gemas.FRA$latitude, Y[,2], col="blue", pch=2)
+points(gemas.FRA$latitude, Y[,3], col="red", pch=3)
+plot(gemas.FRA$latitude, Y[,1], ylim = c(0,1), xlab = "latitude", ylab = expression(Y[1]), pch=1, cex.lab=1.5, cex.axis = 1.5)
+points(gemas.FRA$latitude[207], Y[207,1], col = "red", pch = 1, cex = 2)
+text(gemas.FRA$latitude[207], Y[207,1], labels = "207", col = "red", font = 1.5, pos = 1, cex = 1.2)
+
+plot(gemas.FRA$latitude, Y[,2], ylim = c(0,1), xlab = "latitude", ylab = expression(Y[2]), pch=2, cex.lab=1.5, cex.axis = 1.5)
+points(gemas.FRA$latitude[22], Y[22,2], col = "red", pch = 1, cex = 2)
+text(gemas.FRA$latitude[22], Y[22,2], labels = "22", col = "red", font = 1.5, pos = 1, cex = 1.2)
+
+plot(gemas.FRA$latitude, Y[,3], ylim = c(0,1), xlab = "latitude", ylab = expression(Y[3]), pch=3, cex.lab=1.5, cex.axis = 1.5)
+points(gemas.FRA$latitude[41], Y[41,3], col = "red", pch = 1, cex = 2)
+text(gemas.FRA$latitude[41], Y[41,3], labels = "41", col = "red", font = 1.5, pos = 1, cex = 1.2)
+dev.off()
+
+png("./figures/gemas/MeanTemp_comp.png", width = 500, height = 450)
+par(mfrow=c(2,2), mar=c(4,5,2,1))
+plot(gemas.FRA$MeanTemp, Y[,1], ylim = c(0,1), xlab = "MeanTemp", ylab = expression(Y[1]), pch=1, cex.lab=1.5, cex.axis = 1.5)
+plot(gemas.FRA$MeanTemp, Y[,2], ylim = c(0,1), xlab = "MeanTemp", ylab = expression(Y[2]), pch=2, cex.lab=1.5, cex.axis = 1.5)
+plot(gemas.FRA$MeanTemp, Y[,3], ylim = c(0,1), xlab = "MeanTemp", ylab = expression(Y[3]), pch=3, cex.lab=1.5, cex.axis = 1.5)
+dev.off()
+
+png("./figures/gemas/ph_comp.png", width = 500, height = 450)
+par(mfrow=c(2,2), mar=c(4,5,2,1))
+plot(gemas.FRA$ph_cacl2, Y[,1], ylim = c(0,1), xlab = "ph", ylab = expression(Y[1]), pch=1, cex.lab=1.5, cex.axis = 1.5)
+plot(gemas.FRA$ph_cacl2, Y[,2], ylim = c(0,1), xlab = "ph", ylab = expression(Y[2]), pch=2, cex.lab=1.5, cex.axis = 1.5)
+plot(gemas.FRA$ph_cacl2, Y[,3], ylim = c(0,1), xlab = "ph", ylab = expression(Y[3]), pch=3, cex.lab=1.5, cex.axis = 1.5)
+dev.off()
 
 ## map of Swedish sampling locations
 # lon_rng = range(gemas.SWE$longitude, na.rm = TRUE)
@@ -69,17 +101,20 @@ rownames(Y) = NULL
 gemas.FRA$soilclass = factor(gemas.FRA$soilclass, levels = c("ll", "l", "m","s"))
 table(gemas.FRA$soilclass)
 
-# require(robCompositions)
-# par(mfrow=c(1,1))
-# ternaryDiag(gemas.FRA[,c("sand", "silt", "clay", "soilclass")],
-#             col = as.numeric(gemas.FRA$soilclass),
-#             pch = as.numeric(gemas.FRA$soilclass))
-# legend("topleft", c("l","ll","m","s"), col = 1:4, pch = 1:4)
+require(robCompositions)
+pch.vec <-c(3,15:17)
+png(paste("./figures/gemas/ternary_diag.png",sep = ""), width = 400, height = 350)
+par(mfrow=c(1,1))
+ternaryDiag(gemas.FRA[,c("sand", "silt", "clay")],
+            col = as.numeric(gemas.FRA$soilclass),
+            pch = pch.vec[as.numeric(gemas.FRA$soilclass)])
+legend("topleft", c("ll","l","m","s"), col = 1:4, pch = pch.vec, pt.cex = 1.2)
+dev.off()
 
 # for (i in c("sand", "silt", "clay")) {
 #     png(paste("./figures/gemas/box_", i, ".png",sep = ""), width = 400, height = 350)
 #     par(mfrow=c(1,1), pin=c(6,4), mar=c(4,5,1,1))
-#     boxplot(gemas.FRA[,i]~gemas.FRA$soilclass, 
+#     boxplot(gemas.FRA[,i]~gemas.FRA$soilclass,
 #             ylab = i, xlab = "soilclass", col=rainbow(3, s=0.35),
 #             cex.lab=2, cex.axis=1.5)
 #     dev.off()
@@ -300,16 +335,16 @@ for (b in 1:nIter) {
 
 ## 2.4 summary stats ----
 # rm(list = ls())
-# load("./data/GEMAS_sand.Rdata")
-# round(result, 4)
+load("./data/GEMAS_sand.Rdata")
+round(result, 4)
 # 
-# round(mean(MSPE_LS_cv), 4) 
-# round(mean(MSPE_ESL_cv), 4) 
-# round(mean(MSPE_FSIM_cv, na.rm = T), 4)
-# round(mean(MSPE_SIQR_cv), 4)
+round(mean(MSPE_LS_cv), 4)
+round(mean(MSPE_ESL_cv), 4)
+round(mean(MSPE_FSIM_cv, na.rm = T), 4)
+round(mean(MSPE_SIQR_cv), 4)
 # 
-# round(apply(b_LS.boot, 2, sd),3)
-# round(apply(b_ESL.boot, 2, sd),3)
+round(apply(b_LS.boot, 2, sd),3)
+round(apply(b_ESL.boot, 2, sd),3)
 
 # round(sd(h_LS.boot, na.rm = T), 3)
 # round(sd(h_ESL.boot[which(h_ESL.boot<1)], na.rm = T), 3) # remove unusual runs
