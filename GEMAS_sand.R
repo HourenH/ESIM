@@ -1,5 +1,5 @@
 ## application of ESIM to GEMAS sand compositions
-## last revision: 25.May.2025
+## last revision: 2.Jun.2026
 
 rm(list = ls())
 gemas = read.csv("data/gemas_merge.csv")
@@ -30,10 +30,9 @@ points(gemas.FRA$longitude[c(22,205)], Y[c(22,205),2], col = "red", pch = 1, cex
 text(gemas.FRA$longitude[c(22,205)], Y[c(22,205),2], labels = c("22","205"), col = "red", font = 1.5, pos = 1, cex = 1.2)
 
 plot(gemas.FRA$longitude, Y[,3], ylim = c(0,1), xlab = "longitude", ylab = expression(Y[3]), pch=3, cex.lab=1.5, cex.axis = 1.5)
-points(gemas.FRA$longitude[c(22,23,28,41)], Y[c(22,23,28,41),3], col = "red", pch = 1, cex = 2)
-text(gemas.FRA$longitude[c(23,28)], Y[c(23,28),3], labels = c("23","28"), col = "red", font = 1.5, pos = 4, cex = 1.2)
+points(gemas.FRA$longitude[c(22,23,41)], Y[c(22,23,41),3], col = "red", pch = 1, cex = 2)
+text(gemas.FRA$longitude[c(23)], Y[c(23),3], labels = c("23"), col = "red", font = 1.5, pos = 4, cex = 1.2)
 text(gemas.FRA$longitude[c(22,41)], Y[c(22,41),3], labels = c("22","41"), col = "red", font = 1.5, pos = 1, cex = 1.2)
-
 dev.off()
 
 png("./figures/gemas/lat_comp.png", width = 500, height = 450)
@@ -179,9 +178,10 @@ d = ncol(Y)
 set.seed(1)
 
 id = sample(1:n)
+fold_id = split(id, rep(1:10, length.out = n))
 
 for (fold in 1:10) {
-    test_id <- id[((fold-1) * (n%/%10) + 1):(fold * (n%/%10))]
+    test_id <- fold_id[[fold]]
     X_test = X[test_id,]
     Y_test = Y[test_id,]
     X_train = X[-test_id,]
@@ -202,7 +202,7 @@ for (fold in 1:10) {
     MSPE_LS_cv[fold] = mean(acos(rowSums(LS_mu_pred * Y_test))^2, na.rm = T)
     
     # fit ESIM(ESL)
-    ESL_cv = esl_est(theta_init = LS_cv$theta, bw_init = LS_cv$bw, 
+    ESL_cv = esl_est(theta_init = rep(1,p), bw_init = 0.5,
                   xdat = X_train, ydat = Y_train, delta = 0.2)
     h_ESL.cv[fold] = ESL_cv$bw
     theta_ESL.cv[fold,] = ESL_cv$theta
@@ -220,20 +220,21 @@ for (fold in 1:10) {
     MSPE_ESL_cv[fold] =  mean(acos(rowSums(ESL_mu_pred * Y_test))^2, na.rm = T)
     
     # fit FSIM
-    FSIM_cv = fsim_est(xdat = X_train, ydat = Y_train, init = rep(1,p))
-    h_FSIM.cv[fold] = FSIM_cv$bw
-    theta_FSIM.cv[fold,] = FSIM_cv$theta
-    ## MSE(FSIM)
-    MSE_FSIM_cv[fold] = mean(acos(rowSums(FSIM_cv$mu * Y_train))^2, na.rm = T)
-    ## MSPE(FSIM)
-    FSIM_index = as.vector(X_train %*% FSIM_cv$theta)
-    FSIM_pred_index = as.vector(X_test %*% FSIM_cv$theta)
-    FSIM_mu_pred =t(sapply(FSIM_pred_index, LocSpheGeoReg,
-                           xin =FSIM_index, yin = Y_train, optns = list(bw=FSIM_cv$bw,kernel = "gauss")))
-    MSPE_FSIM_cv[fold] = mean(acos(rowSums(FSIM_mu_pred * Y_test))^2, na.rm = T)
+    try({FSIM_cv = fsim_est(xdat = X_train, ydat = Y_train, init = rep(1,p))
+        h_FSIM.cv[fold] = FSIM_cv$bw
+        theta_FSIM.cv[fold,] = FSIM_cv$theta
+        ## MSE(FSIM)
+        MSE_FSIM_cv[fold] = mean(acos(rowSums(FSIM_cv$mu * Y_train))^2, na.rm = T)
+        ## MSPE(FSIM)
+        FSIM_index = as.vector(X_train %*% FSIM_cv$theta)
+        FSIM_pred_index = as.vector(X_test %*% FSIM_cv$theta)
+        FSIM_mu_pred =t(sapply(FSIM_pred_index, LocSpheGeoReg,
+                               xin =FSIM_index, yin = Y_train, optns = list(bw=FSIM_cv$bw,kernel = "gauss")))
+        MSPE_FSIM_cv[fold] = mean(acos(rowSums(FSIM_mu_pred * Y_test))^2, na.rm = T)
+    })
     
     # fit SIQR
-    SIQR.fit = index.gamma(y=Y_train, xx=X_train, tau=0.5, gamma0 = theta_LS.cv[fold,], maxiter = 100, crit = 1e-3)
+    SIQR.fit = index.gamma(y=Y_train, xx=X_train, tau=0.5, gamma0 = rep(1,p), maxiter = 100, crit = 1e-3)
     # SIQR.fit = siqr_est(param = c(1,1,1), xdat = X, ydat = Y)
     theta_SIQR.cv[fold,] = SIQR.fit$theta
     h_SIQR.cv[fold] = SIQR.fit$bw
@@ -310,33 +311,100 @@ rownames(result) = c("LS", "ESL", "FSIM", "SIQR")
 result
 save.image("./data/GEMAS_sand.Rdata")
 
-## 2.3 Bootstrap for SE of LS and ESL ----
+
+## 2.3 model with full samples after removing suspectable outliers ----
+# remove suspectable outliers 22 23 41 205 207
+outlier_id = c(22,23,41,205,207)
+X_sub = X[-outlier_id,]
+Y_sub = Y[-outlier_id,]
+n_sub = nrow(X_sub)
+
+# fit ESIM(LS)
+LS_sub = ls_est(c(LS$bw, LS$theta), xdat = X_sub, ydat = Y_sub)
+h_LS_sub = LS_sub$bw
+theta_LS_sub = SpheNormalize(LS_sub$theta)
+LS_mu_sub = t(apply(LS_sub$mu, 1, SpheNormalize))
+## MSE(LS)
+MSE_LS_sub = mean(acos(rowSums(LS_mu_sub * Y_sub))^2, na.rm = T)
+
+# fit ESIM(ESL)
+ESL_sub = esl_est(theta_init = ESL$theta, bw_init = ESL$bw,
+                  xdat = X_sub, ydat = Y_sub, delta = 0.2)
+h_ESL_sub= ESL_sub$bw
+theta_ESL_sub = SpheNormalize(ESL_sub$theta)
+ESL_mu_sub = t(apply(ESL_sub$mu, 1, SpheNormalize))
+## MSE(ESL)
+MSE_ESL_sub = mean(acos(rowSums(ESL_mu_sub * Y_sub))^2, na.rm = T)
+
+# fit FSIM
+FSIM_sub = fsim_est(xdat = X_sub, ydat = Y_sub, init = FSIM$theta)
+h_FSIM_sub = FSIM_sub$bw
+theta_FSIM_sub = SpheNormalize(FSIM_sub$theta)
+## MSE(FSIM)
+MSE_FSIM_sub = mean(acos(rowSums(FSIM_sub$mu * Y_sub))^2, na.rm = T)
+
+# fit SIQR
+SIQR_sub = index.gamma(y=Y_sub, xx=X_sub, tau=0.5, gamma0 = SIQR$theta, maxiter = 100, crit = 1e-3)
+theta_SIQR_sub = SpheNormalize(SIQR_sub$theta)
+h_SIQR_sub = SIQR_sub$bw
+## MSE(SIQR)
+SIQR_index_sub = X_sub %*% t(t(theta_SIQR_sub))
+SIQR_mu_sub = sapply(1:length(SIQR_index_sub), function(r){
+    lprq_mul(SIQR_index_sub[r], SIQR_index_sub[-r], Y_sub[-r,], h=h_SIQR_sub)
+})
+SIQR_mu_sub = t(apply(SIQR_mu_sub, 2, SpheNormalize))
+MSE_SIQR_sub = mean(acos(rowSums(SIQR_mu_sub * Y_sub))^2, na.rm = T)
+
+result_sub = matrix(c(theta_LS_sub, h_LS_sub, MSE_LS_sub,
+                      theta_ESL_sub, h_ESL_sub, MSE_ESL_sub,
+                      theta_FSIM_sub, h_FSIM_sub, MSE_FSIM_sub,
+                      theta_SIQR_sub, h_SIQR_sub, MSE_SIQR_sub), byrow = T, nrow = 4)
+colnames(result_sub) = c(colnames(X_sub), "h", "MSE")
+rownames(result_sub) = c("LS", "ESL", "FSIM", "SIQR")
+result_sub
+save.image("./data/GEMAS_sand.Rdata")
+
+## 2.4 Bootstrap for SE of LS and ESL ----
 nIter = 500
 b_ESL.boot = b_LS.boot = matrix(0, nrow = nIter, ncol = ncol(X))
 colnames(b_LS.boot) = colnames(b_ESL.boot) = colnames(X)
 h_ESL.boot = h_LS.boot = rep(0, nIter)
+b_ESL_sub.boot = b_LS_sub.boot = matrix(0, nrow = nIter, ncol = ncol(X_sub))
+colnames(b_LS_sub.boot) = colnames(b_ESL_sub.boot) = colnames(X_sub)
+h_ESL_sub.boot = h_LS_sub.boot = rep(0, nIter)
 
 set.seed(100)
 for (b in 1:nIter) {
-    # weighted bootstrap for LS
+    # weighted bootstrap for LS with full sample
     w = rexp(n, rate = 1)
     w = n * w / sum(w)
     LS_boot = ls_est_weight(c(LS$bw, LS$theta), xdat = X, ydat = Y, weight = w)
     b_LS.boot[b,] = LS_boot$theta; h_LS.boot[b] = LS_boot$bw
-    # weighted bootstrap for ESL
+    # weighted bootstrap for ESL with full sample
     w = rexp(n, rate = 1)
     w = n * w / sum(w)
-    ESL_boot = esl_index_bw(theta_init = ESL$theta, bw_init = ESL$bw, xdat = X, ydat = Y, lambda = ESL$lambda, w = w)
+    ESL_boot = esl_index_bw(theta_init = ESL$theta, bw_init = ESL$bw,
+                            xdat = X, ydat = Y, lambda = ESL$lambda, w = w)
     b_ESL.boot[b,] = ESL_boot$theta; h_ESL.boot[b] = ESL_boot$bw
+    # weighted bootstrap for LS with subset
+    w = rexp(n_sub, rate = 1)
+    w = n_sub * w / sum(w)
+    LS_sub_boot = ls_est_weight(c(LS_sub$bw, LS_sub$theta), xdat = X_sub, ydat = Y_sub, weight = w)
+    b_LS_sub.boot[b,] = LS_sub_boot$theta; h_LS_sub.boot[b] = LS_sub_boot$bw
+    # weighted bootstrap for ESL with subset
+    w = rexp(n_sub, rate = 1)
+    w = n_sub * w / sum(w)
+    ESL_sub_boot = esl_index_bw(theta_init = ESL_sub$theta, bw_init = ESL_sub$bw,
+                                xdat = X_sub, ydat = Y_sub, lambda = ESL_sub$lambda, w = w)
+    b_ESL_sub.boot[b,] = ESL_sub_boot$theta; h_ESL_sub.boot[b] = ESL_sub_boot$bw
     save.image("./data/GEMAS_sand.Rdata")
 }
 
-
-
-## 2.4 summary stats ----
+## 2.5 summary stats ----
 # rm(list = ls())
 load("./data/GEMAS_sand.Rdata")
 round(result, 4)
+round(result_sub, 4)
 # 
 round(mean(MSPE_LS_cv), 4)
 round(mean(MSPE_ESL_cv), 4)
@@ -345,6 +413,8 @@ round(mean(MSPE_SIQR_cv), 4)
 # 
 round(apply(b_LS.boot, 2, sd),3)
 round(apply(b_ESL.boot, 2, sd),3)
+round(apply(b_LS_sub.boot, 2, sd),3)
+round(apply(b_ESL_sub.boot, 2, sd),3)
 
 # round(sd(h_LS.boot, na.rm = T), 3)
 # round(sd(h_ESL.boot[which(h_ESL.boot<1)], na.rm = T), 3) # remove unusual runs

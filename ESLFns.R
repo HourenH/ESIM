@@ -292,7 +292,7 @@ cost_index_bw <- function(param, xdat, ydat, lambda, weight, w=NA){
 #' \item{psi}{Matrix of estimated weights from the exponential squared loss.}
 #' \item{iter}{Number of iterations used until convergence (or \code{maxiter} if not converged).}
 
-esl_index_bw <- function(theta_init, bw_init, xdat, ydat, lambda, w = NA, abstol=1e-4, maxiter=100){
+esl_index_bw <- function(theta_init, bw_init, xdat, ydat, lambda, w = NA, abstol=1e-4, maxiter=200){
     dist_ = 1e5
     iter = 0
     n = nrow(xdat); d = ncol(ydat)
@@ -827,7 +827,7 @@ lprq0<-function (x, y, h, tau = 0.5, x0)  #used in step 1 of the algorithm
     list(x0 = x0, fv = fv, dv = dv)
 }
 
-#' Compute component-wise local constant quantile fits.
+#' Compute component-wise local linear quantile fits.
 #'
 #' Each column of the multivariate response is fitted separately at the same
 #' evaluation point. A scalar bandwidth is recycled across all response
@@ -839,18 +839,19 @@ lprq0<-function (x, y, h, tau = 0.5, x0)  #used in step 1 of the algorithm
 #' @param h Positive numeric scalar or length-d vector, bandwidth value(s).
 #' @param tau Numeric scalar in (0, 1), quantile level. Defaults to 0.5.
 #'
-#' @returns Numeric vector of length d, the fitted quantile for each response component.
+#' @returns Numeric vector of length d, the local linear fitted quantile for each response component.
 #'
 lprq_mul <- function(x0, x, y, h, tau = 0.5){
+    y <- as.matrix(y)
     z <- x - x0
     if(length(h) == 1){
         h <- rep(h, ncol(y))
     }
     fv = NULL
     for (col_ in 1:ncol(y)) {
-        wx <- dnorm(z/h[col_])
-        r <- rq(y[,col_]~1, weights = wx, tau = tau, ci=FALSE)
-        fv = c(fv, r$coef[1])
+        wx <- dnorm(z/h[col_]) / h[col_]
+        r <- rq(y[,col_] ~ z, weights = wx, tau = tau, ci=FALSE)
+        fv = c(fv, as.numeric(r$coef[1]))
     }
     fv
 }
