@@ -16,11 +16,8 @@ rownames(Y) = NULL
 
 # 1.EDA ----
 ## 1.1 Soil textural composition ----
-png("./figures/gemas/lon_comp.png", width = 500, height = 450)
-par(mfrow=c(2,2), mar=c(4,5,2,1))
-plot(gemas.FRA$longitude, Y[,1], ylim = c(0,1), xlab = "longitude", ylab = "Y", pch=1, cex.lab=1.5, cex.axis = 1.5)
-points(gemas.FRA$longitude, Y[,2], col="blue", pch=2)
-points(gemas.FRA$longitude, Y[,3], col="red", pch=3)
+png("./figures/gemas/lon_comp.png", width = 750, height = 450)
+par(mfrow=c(2,3), mar=c(4,5,2,1))
 plot(gemas.FRA$longitude, Y[,1], ylim = c(0,1), xlab = "longitude", ylab = expression(Y[1]), pch=1, cex.lab=1.5, cex.axis = 1.5)
 points(gemas.FRA$longitude[207], Y[207,1], col = "red", pch = 1, cex = 2)
 text(gemas.FRA$longitude[207], Y[207,1], labels = "207", col = "red", font = 1.5, pos = 1, cex = 1.2)
@@ -33,13 +30,7 @@ plot(gemas.FRA$longitude, Y[,3], ylim = c(0,1), xlab = "longitude", ylab = expre
 points(gemas.FRA$longitude[c(22,23,41)], Y[c(22,23,41),3], col = "red", pch = 1, cex = 2)
 text(gemas.FRA$longitude[c(23)], Y[c(23),3], labels = c("23"), col = "red", font = 1.5, pos = 4, cex = 1.2)
 text(gemas.FRA$longitude[c(22,41)], Y[c(22,41),3], labels = c("22","41"), col = "red", font = 1.5, pos = 1, cex = 1.2)
-dev.off()
 
-png("./figures/gemas/lat_comp.png", width = 500, height = 450)
-par(mfrow=c(2,2), mar=c(4,5,2,1))
-plot(gemas.FRA$latitude, Y[,1], ylim = c(0,1), xlab = "latitude", ylab = "Y", pch=1, cex.lab=1.5, cex.axis = 1.5)
-points(gemas.FRA$latitude, Y[,2], col="blue", pch=2)
-points(gemas.FRA$latitude, Y[,3], col="red", pch=3)
 plot(gemas.FRA$latitude, Y[,1], ylim = c(0,1), xlab = "latitude", ylab = expression(Y[1]), pch=1, cex.lab=1.5, cex.axis = 1.5)
 points(gemas.FRA$latitude[207], Y[207,1], col = "red", pch = 1, cex = 2)
 text(gemas.FRA$latitude[207], Y[207,1], labels = "207", col = "red", font = 1.5, pos = 1, cex = 1.2)
@@ -53,15 +44,12 @@ points(gemas.FRA$latitude[41], Y[41,3], col = "red", pch = 1, cex = 2)
 text(gemas.FRA$latitude[41], Y[41,3], labels = "41", col = "red", font = 1.5, pos = 1, cex = 1.2)
 dev.off()
 
-png("./figures/gemas/MeanTemp_comp.png", width = 500, height = 450)
-par(mfrow=c(2,2), mar=c(4,5,2,1))
+png("./figures/gemas/MeanTemp_ph_comp.png", width = 750, height = 450)
+par(mfrow=c(2,3), mar=c(4,5,2,1))
 plot(gemas.FRA$MeanTemp, Y[,1], ylim = c(0,1), xlab = "MeanTemp", ylab = expression(Y[1]), pch=1, cex.lab=1.5, cex.axis = 1.5)
 plot(gemas.FRA$MeanTemp, Y[,2], ylim = c(0,1), xlab = "MeanTemp", ylab = expression(Y[2]), pch=2, cex.lab=1.5, cex.axis = 1.5)
 plot(gemas.FRA$MeanTemp, Y[,3], ylim = c(0,1), xlab = "MeanTemp", ylab = expression(Y[3]), pch=3, cex.lab=1.5, cex.axis = 1.5)
-dev.off()
 
-png("./figures/gemas/ph_comp.png", width = 500, height = 450)
-par(mfrow=c(2,2), mar=c(4,5,2,1))
 plot(gemas.FRA$ph_cacl2, Y[,1], ylim = c(0,1), xlab = "ph", ylab = expression(Y[1]), pch=1, cex.lab=1.5, cex.axis = 1.5)
 plot(gemas.FRA$ph_cacl2, Y[,2], ylim = c(0,1), xlab = "ph", ylab = expression(Y[2]), pch=2, cex.lab=1.5, cex.axis = 1.5)
 plot(gemas.FRA$ph_cacl2, Y[,3], ylim = c(0,1), xlab = "ph", ylab = expression(Y[3]), pch=3, cex.lab=1.5, cex.axis = 1.5)
@@ -166,29 +154,43 @@ rm(gemas.FRA)
 # 2.Fit model ----
 source("ESLFns.R")
 
-## 2.1 10-fold CV for MSE and MSPE ----
-MSE_LS_cv <- MSPE_LS_cv <- MSE_ESL_cv <- MSPE_ESL_cv <- MSE_FSIM_cv <- MSPE_FSIM_cv <- MSE_SIQR_cv <- MSPE_SIQR_cv <- rep(0, 10)
-theta_LS.cv <- theta_ESL.cv <- theta_FSIM.cv <- theta_SIQR.cv <- matrix(0, nrow = 10, ncol = ncol(X))
-colnames(theta_LS.cv)= colnames(theta_ESL.cv) = colnames(theta_FSIM.cv) = colnames(theta_SIQR.cv) = colnames(X)
-h_LS.cv <- h_ESL.cv <- h_FSIM.cv <- h_SIQR.cv <- lambda.cv <- rep(0,10)
+## 2.1 5-fold CV for MSE and MSPE ----
+nfold = 5
 p = dim(X)[2]
 n = nrow(X)
 d = ncol(Y)
 
-set.seed(1)
+MSE_LS_cv <- MSPE_LS_cv <- MSE_ESL_cv <- MSPE_ESL_cv <- MSE_FSIM_cv <- MSPE_FSIM_cv <- MSE_SIQR_cv <- MSPE_SIQR_cv <- rep(0, nfold)
+theta_LS.cv <- theta_ESL.cv <- theta_FSIM.cv <- theta_SIQR.cv <- matrix(0, nrow = nfold, ncol = ncol(X))
+colnames(theta_LS.cv)= colnames(theta_ESL.cv) = colnames(theta_FSIM.cv) = colnames(theta_SIQR.cv) = colnames(X)
+h_LS.cv <- h_ESL.cv <- h_FSIM.cv <- h_SIQR.cv <- lambda.cv <- rep(0,nfold)
 
+set.seed(10)
 id = sample(1:n)
-fold_id = split(id, rep(1:10, length.out = n))
+fold_id = split(id, rep(seq_len(nfold), length.out = n))
 
-for (fold in 1:10) {
+for (fold in seq_len(nfold)) {
     test_id <- fold_id[[fold]]
     X_test = X[test_id,]
     Y_test = Y[test_id,]
     X_train = X[-test_id,]
     Y_train = Y[-test_id,]
-    
-    # fit ESIM(LS)
-    LS_cv = ls_est(c(0.5, rep(1,p)), xdat = X_train, ydat = Y_train)
+
+    # fit ESIM(LS) with 50 random initial values
+    LS_fits = lapply(1:100, function(start_){
+        set.seed(start_)
+        theta_init = SpheNormalize(rnorm(p))
+        if(theta_init[1] < 0) {theta_init = -theta_init} # ensure positive leading component
+
+        x_init = as.vector(X_train %*% theta_init)
+        bw_init = stats::sd(x_init) * n^(-1/5) # rule of thumb bandwidth
+        fit = ls_est(c(bw_init, theta_init), xdat = X_train, ydat = Y_train)
+        fit$cost_value = cost_ESIM(c(fit$bw, fit$theta), xdat = X_train, ydat = Y_train)
+        return(fit)
+    })
+
+    LS_loss = sapply(LS_fits, function(fit) fit$cost_value)
+    LS_cv = LS_fits[[which.min(LS_loss)]]
     h_LS.cv[fold] = LS_cv$bw
     theta_LS.cv[fold,] = LS_cv$theta
     ## MSE(LS)
@@ -202,7 +204,7 @@ for (fold in 1:10) {
     MSPE_LS_cv[fold] = mean(acos(rowSums(LS_mu_pred * Y_test))^2, na.rm = T)
     
     # fit ESIM(ESL)
-    ESL_cv = esl_est(theta_init = rep(1,p), bw_init = 0.5,
+    ESL_cv = esl_est(theta_init = LS_cv$theta, bw_init = LS_cv$bw,
                   xdat = X_train, ydat = Y_train, delta = 0.2)
     h_ESL.cv[fold] = ESL_cv$bw
     theta_ESL.cv[fold,] = ESL_cv$theta
@@ -219,22 +221,8 @@ for (fold in 1:10) {
     ESL_mu_pred = t(apply(ESL_pred, 2, SpheNormalize))                 
     MSPE_ESL_cv[fold] =  mean(acos(rowSums(ESL_mu_pred * Y_test))^2, na.rm = T)
     
-    # fit FSIM
-    try({FSIM_cv = fsim_est(xdat = X_train, ydat = Y_train, init = rep(1,p))
-        h_FSIM.cv[fold] = FSIM_cv$bw
-        theta_FSIM.cv[fold,] = FSIM_cv$theta
-        ## MSE(FSIM)
-        MSE_FSIM_cv[fold] = mean(acos(rowSums(FSIM_cv$mu * Y_train))^2, na.rm = T)
-        ## MSPE(FSIM)
-        FSIM_index = as.vector(X_train %*% FSIM_cv$theta)
-        FSIM_pred_index = as.vector(X_test %*% FSIM_cv$theta)
-        FSIM_mu_pred =t(sapply(FSIM_pred_index, LocSpheGeoReg,
-                               xin =FSIM_index, yin = Y_train, optns = list(bw=FSIM_cv$bw,kernel = "gauss")))
-        MSPE_FSIM_cv[fold] = mean(acos(rowSums(FSIM_mu_pred * Y_test))^2, na.rm = T)
-    })
-    
     # fit SIQR
-    SIQR.fit = index.gamma(y=Y_train, xx=X_train, tau=0.5, gamma0 = rep(1,p), maxiter = 100, crit = 1e-3)
+    SIQR.fit = index.gamma(y=Y_train, xx=X_train, tau=0.5, gamma0 = LS_cv$theta, maxiter = 100, crit = 1e-3)
     # SIQR.fit = siqr_est(param = c(1,1,1), xdat = X, ydat = Y)
     theta_SIQR.cv[fold,] = SIQR.fit$theta
     h_SIQR.cv[fold] = SIQR.fit$bw
@@ -251,6 +239,20 @@ for (fold in 1:10) {
     SIQR.predict = t(apply(SIQR.predict, 2, SpheNormalize))
     MSPE_SIQR_cv[fold] = mean(acos(rowSums(SIQR.predict * Y_test))^2, na.rm = T)
     
+    # fit FSIM
+    try({FSIM_cv = fsim_est(xdat = X_train, ydat = Y_train, init = LS_cv$theta)
+        h_FSIM.cv[fold] = FSIM_cv$bw
+        theta_FSIM.cv[fold,] = FSIM_cv$theta
+        ## MSE(FSIM)
+        MSE_FSIM_cv[fold] = mean(acos(rowSums(FSIM_cv$mu * Y_train))^2, na.rm = T)
+        ## MSPE(FSIM)
+        FSIM_index = as.vector(X_train %*% FSIM_cv$theta)
+        FSIM_pred_index = as.vector(X_test %*% FSIM_cv$theta)
+        FSIM_mu_pred =t(sapply(FSIM_pred_index, LocSpheGeoReg,
+                               xin =FSIM_index, yin = Y_train, optns = list(bw=FSIM_cv$bw,kernel = "gauss")))
+        MSPE_FSIM_cv[fold] = mean(acos(rowSums(FSIM_mu_pred * Y_test))^2, na.rm = T)
+    })
+
     ## save cv results
     save.image("./data/GEMAS_sand.Rdata")
 }
@@ -320,7 +322,8 @@ Y_sub = Y[-outlier_id,]
 n_sub = nrow(X_sub)
 
 # fit ESIM(LS)
-LS_sub = ls_est(c(LS$bw, LS$theta), xdat = X_sub, ydat = Y_sub)
+LS_sub = ls_est(init.LS, xdat = X_sub, ydat = Y_sub)
+LS_sub = ls_est(c(LS$bw,LS$theta), xdat = X_sub, ydat = Y_sub)
 h_LS_sub = LS_sub$bw
 theta_LS_sub = SpheNormalize(LS_sub$theta)
 LS_mu_sub = t(apply(LS_sub$mu, 1, SpheNormalize))
@@ -328,7 +331,7 @@ LS_mu_sub = t(apply(LS_sub$mu, 1, SpheNormalize))
 MSE_LS_sub = mean(acos(rowSums(LS_mu_sub * Y_sub))^2, na.rm = T)
 
 # fit ESIM(ESL)
-ESL_sub = esl_est(theta_init = ESL$theta, bw_init = ESL$bw,
+ESL_sub = esl_est(theta_init = init.ESL, bw_init = mean(h_ESL.cv),
                   xdat = X_sub, ydat = Y_sub, delta = 0.2)
 h_ESL_sub= ESL_sub$bw
 theta_ESL_sub = SpheNormalize(ESL_sub$theta)
@@ -344,7 +347,7 @@ theta_FSIM_sub = SpheNormalize(FSIM_sub$theta)
 MSE_FSIM_sub = mean(acos(rowSums(FSIM_sub$mu * Y_sub))^2, na.rm = T)
 
 # fit SIQR
-SIQR_sub = index.gamma(y=Y_sub, xx=X_sub, tau=0.5, gamma0 = SIQR$theta, maxiter = 100, crit = 1e-3)
+SIQR_sub = index.gamma(y=Y_sub, xx=X_sub, tau=0.5, gamma0 = colMeans(theta_SIQR.cv), maxiter = 100, crit = 1e-3)
 theta_SIQR_sub = SpheNormalize(SIQR_sub$theta)
 h_SIQR_sub = SIQR_sub$bw
 ## MSE(SIQR)
