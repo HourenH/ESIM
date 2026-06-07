@@ -177,20 +177,20 @@ for (fold in seq_len(nfold)) {
     Y_train = Y[-test_id,]
 
     # fit ESIM(LS) with 50 random initial values
-    LS_fits = lapply(1:100, function(start_){
-        set.seed(start_)
-        theta_init = SpheNormalize(rnorm(p))
-        if(theta_init[1] < 0) {theta_init = -theta_init} # ensure positive leading component
-
-        x_init = as.vector(X_train %*% theta_init)
-        bw_init = stats::sd(x_init) * n^(-1/5) # rule of thumb bandwidth
-        fit = ls_est(c(bw_init, theta_init), xdat = X_train, ydat = Y_train)
-        fit$cost_value = cost_ESIM(c(fit$bw, fit$theta), xdat = X_train, ydat = Y_train)
-        return(fit)
-    })
-
-    LS_loss = sapply(LS_fits, function(fit) fit$cost_value)
-    LS_cv = LS_fits[[which.min(LS_loss)]]
+    # LS_fits = lapply(1:100, function(start_){
+    #     set.seed(start_)
+    #     theta_init = SpheNormalize(rnorm(p))
+    #     if(theta_init[1] < 0) {theta_init = -theta_init} # ensure positive leading component
+    #
+    #     x_init = as.vector(X_train %*% theta_init)
+    #     bw_init = stats::sd(x_init) * n^(-1/5) # rule of thumb bandwidth
+    #     fit = ls_est(c(bw_init, theta_init), xdat = X_train, ydat = Y_train)
+    #     fit$cost_value = cost_ESIM(c(fit$bw, fit$theta), xdat = X_train, ydat = Y_train)
+    #     return(fit)
+    # })
+    # LS_loss = sapply(LS_fits, function(fit) fit$cost_value)
+    # LS_cv = LS_fits[[which.min(LS_loss)]]
+    LS_cv = ls_est(c(0.5, rep(1,p)), xdat = X_train, ydat = Y_train)
     h_LS.cv[fold] = LS_cv$bw
     theta_LS.cv[fold,] = LS_cv$theta
     ## MSE(LS)
@@ -222,22 +222,21 @@ for (fold in seq_len(nfold)) {
     MSPE_ESL_cv[fold] =  mean(acos(rowSums(ESL_mu_pred * Y_test))^2, na.rm = T)
     
     # fit SIQR
-    SIQR.fit = index.gamma(y=Y_train, xx=X_train, tau=0.5, gamma0 = LS_cv$theta, maxiter = 100, crit = 1e-3)
-    # SIQR.fit = siqr_est(param = c(1,1,1), xdat = X, ydat = Y)
-    theta_SIQR.cv[fold,] = SIQR.fit$theta
-    h_SIQR.cv[fold] = SIQR.fit$bw
+    SIQR_cv = index.gamma(y=Y_train, xx=X_train, tau=0.5, gamma0 = LS_cv$theta, maxiter = 100, crit = 1e-3)
+    theta_SIQR.cv[fold,] = SIQR_cv$theta
+    h_SIQR.cv[fold] = SIQR_cv$bw
     ## MSE of SIQR
-    SIQR_index = as.vector(X_train %*% theta_SIQR.cv[fold,])
+    SIQR_index = as.vector(X_train %*% SIQR_cv$theta)
     SIQR_mu = sapply(1:length(SIQR_index), function(r){
-        lprq_mul(SIQR_index[r], SIQR_index[-r], Y_train[-r,], h=h_SIQR.cv[fold])
+        lprq_mul(SIQR_index[r], SIQR_index[-r], Y_train[-r,], h=SIQR_cv$bw)
     })
     SIQR_mu = t(apply(SIQR_mu, 2, SpheNormalize))
     MSE_SIQR_cv[fold] = mean(acos(rowSums(SIQR_mu * Y_train))^2, na.rm = T)
     ## MSPE of SIQR
-    SIQR.predict = sapply(as.vector(X_test %*% theta_SIQR.cv[fold,]),
-                          lprq_mul, x = SIQR_index, y = Y_train, h = h_SIQR.cv[fold])
-    SIQR.predict = t(apply(SIQR.predict, 2, SpheNormalize))
-    MSPE_SIQR_cv[fold] = mean(acos(rowSums(SIQR.predict * Y_test))^2, na.rm = T)
+    SIQR_pred_index = as.vector(X_test %*% SIQR_cv$theta)
+    SIQR_pred = sapply(SIQR_pred_index, lprq_mul, x = SIQR_index, y = Y_train, h = SIQR_cv$bw)
+    SIQR_mu_pred = t(apply(SIQR_pred, 2, SpheNormalize))
+    MSPE_SIQR_cv[fold] = mean(acos(rowSums(SIQR_mu_pred * Y_test))^2, na.rm = T)
     
     # fit FSIM
     try({FSIM_cv = fsim_est(xdat = X_train, ydat = Y_train, init = LS_cv$theta)
@@ -261,6 +260,7 @@ for (fold in seq_len(nfold)) {
 
 ## 2.2 model with full samples ----
 # fit ESIM(LS)
+set.seed(1000)
 ## init
 init.LS = colMeans(theta_LS.cv)
 init.LS = SpheNormalize(init.LS)
@@ -283,15 +283,6 @@ ESL_mu_full = t(apply(ESL$mu, 1, SpheNormalize))
 ## MSE(ESL)
 MSE_ESL = mean(acos(rowSums(ESL_mu_full * Y))^2, na.rm = T)
 
-# fit FSIM
-init.FSIM = colMeans(theta_FSIM.cv)
-init.FSIM = SpheNormalize(init.FSIM)
-FSIM = fsim_est(xdat = X, ydat = Y, init = init.FSIM)
-h_FSIM = FSIM$bw
-theta_FSIM = SpheNormalize(FSIM$theta)
-## MSE(FSIM)
-MSE_FSIM = mean(acos(rowSums(FSIM$mu * Y))^2, na.rm = T)
-
 # fit SIQR
 SIQR = index.gamma(y=Y, xx=X, tau=0.5, gamma0 = colMeans(theta_SIQR.cv), maxiter = 100, crit = 1e-3)
 theta_SIQR = SpheNormalize(SIQR$theta)
@@ -303,6 +294,15 @@ SIQR_mu = sapply(1:length(SIQR_index), function(r){
 })
 SIQR_mu = t(apply(SIQR_mu, 2, SpheNormalize))
 MSE_SIQR = mean(acos(rowSums(SIQR_mu * Y))^2, na.rm = T)
+
+# fit FSIM
+init.FSIM = colMeans(theta_FSIM.cv)
+init.FSIM = SpheNormalize(init.FSIM)
+FSIM = fsim_est(xdat = X, ydat = Y, init = init.FSIM)
+h_FSIM = FSIM$bw
+theta_FSIM = SpheNormalize(FSIM$theta)
+## MSE(FSIM)
+MSE_FSIM = mean(acos(rowSums(FSIM$mu * Y))^2, na.rm = T)
 
 result = matrix(c(theta_LS, h_LS, MSE_LS, 
                   theta_ESL, h_ESL, MSE_ESL,
@@ -323,7 +323,6 @@ n_sub = nrow(X_sub)
 
 # fit ESIM(LS)
 LS_sub = ls_est(init.LS, xdat = X_sub, ydat = Y_sub)
-LS_sub = ls_est(c(LS$bw,LS$theta), xdat = X_sub, ydat = Y_sub)
 h_LS_sub = LS_sub$bw
 theta_LS_sub = SpheNormalize(LS_sub$theta)
 LS_mu_sub = t(apply(LS_sub$mu, 1, SpheNormalize))
@@ -339,13 +338,6 @@ ESL_mu_sub = t(apply(ESL_sub$mu, 1, SpheNormalize))
 ## MSE(ESL)
 MSE_ESL_sub = mean(acos(rowSums(ESL_mu_sub * Y_sub))^2, na.rm = T)
 
-# fit FSIM
-FSIM_sub = fsim_est(xdat = X_sub, ydat = Y_sub, init = FSIM$theta)
-h_FSIM_sub = FSIM_sub$bw
-theta_FSIM_sub = SpheNormalize(FSIM_sub$theta)
-## MSE(FSIM)
-MSE_FSIM_sub = mean(acos(rowSums(FSIM_sub$mu * Y_sub))^2, na.rm = T)
-
 # fit SIQR
 SIQR_sub = index.gamma(y=Y_sub, xx=X_sub, tau=0.5, gamma0 = colMeans(theta_SIQR.cv), maxiter = 100, crit = 1e-3)
 theta_SIQR_sub = SpheNormalize(SIQR_sub$theta)
@@ -357,6 +349,13 @@ SIQR_mu_sub = sapply(1:length(SIQR_index_sub), function(r){
 })
 SIQR_mu_sub = t(apply(SIQR_mu_sub, 2, SpheNormalize))
 MSE_SIQR_sub = mean(acos(rowSums(SIQR_mu_sub * Y_sub))^2, na.rm = T)
+
+# fit FSIM
+FSIM_sub = fsim_est(xdat = X_sub, ydat = Y_sub, init = FSIM$theta)
+h_FSIM_sub = FSIM_sub$bw
+theta_FSIM_sub = SpheNormalize(FSIM_sub$theta)
+## MSE(FSIM)
+MSE_FSIM_sub = mean(acos(rowSums(FSIM_sub$mu * Y_sub))^2, na.rm = T)
 
 result_sub = matrix(c(theta_LS_sub, h_LS_sub, MSE_LS_sub,
                       theta_ESL_sub, h_ESL_sub, MSE_ESL_sub,

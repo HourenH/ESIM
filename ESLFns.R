@@ -155,7 +155,84 @@ ls_est <- function(param, xdat, ydat){
     return(list(theta = theta, bw = bw, mu = mu, mudev = mudev))
 }
 
+#' Weighted cost function of the extrinsic single-index model using least squares.
+#'
+#' @param param A numeric vector of length (p+1), the first component is the bandwidth and the remaining components are the parameter coefficients.
+#' @param xdat An n by p matrix, the p-dimensional covariates.
+#' @param ydat An n by d matrix of response vectors, each row a d-dimensional unit vector.
+#' @param weight A numeric vector of length n, the observation weights for the weighted least squares objective.
+#'
+#' @returns Scalar, the weighted loss value.
+cost_ESIM_weight<- function(param, xdat, ydat, weight){
+    MaxPanelty = .Machine$double.xmax
+    K = dnorm # kernel function
+    dx = ncol(xdat); dy = ncol(ydat)
+    n = nrow(xdat)
 
+    if(dx != (length(param)-1)){
+        stop("xdat has different dimensions with param.")
+    }
+
+    bw = param[1] # bandwidth
+
+    theta = param[-1]
+    theta = sign(theta[1]) * SpheNormalize(theta) # parametric coefficients
+
+    index_ = xdat %*% theta
+
+    bw_range = SetBwRange(xin = index_, xout = index_, kernel_type = "gauss")# avoid small or negative bandwidth
+    if(bw>bw_range$max || bw < bw_range$min){return(.Machine$double.xmax)}
+
+    # leave one out local linear of mu and first derivative
+    llmu = sapply(1:n, function(r_){
+        ll_LS_weight(txdat = index_[-r_], tydat = ydat[-r_,], exdat = index_[r_], bw, weight = weight[-r_])
+    })
+    llmu = t(llmu)[,1:dy]
+    # objective value
+    if (any(is.nan(llmu))) {return(.Machine$double.xmax)}
+    sum(weight * (ydat - llmu)^2)
+
+}
+
+#' Weighted estimation of the extrinsic single-index model using least squares.
+#'
+#' This function estimates the parameter coefficients \eqn{\theta} and the bandwidth
+#' for an extrinsic single-index model using a weighted leave-one-out local linear regression
+#' with the least squares loss.
+#'
+#' @param param A numeric of length (p+1). The first component is the initial value of the bandwidth and the remaining components are the initial value of the parametric coefficients.
+#' @param xdat An n by p matrix, the p-dimensional covariates.
+#' @param ydat An n by d matrix of response vectors, each row a d-dimensional unit vector.
+#' @param weight A numeric vector of length n, the observation weights for the weighted least squares objective.
+#'
+#' @returns A list containing:
+#' \describe{
+#'   \item{theta}{Estimated parameter coefficients, normalized to have unit length and a positive leading component.}
+#'   \item{bw}{Estimated bandwidth for local linear regression.}
+#'   \item{mu}{An n by d matrix of leave-one-out weighted local linear regression estimates of the response.}
+#'   \item{mudev}{An n by d matrix of leave-one-out estimates of the derivative of the regression function.}
+#' }
+#'
+#' @export
+#'
+#' @examples
+ls_est_weight <- function(param, xdat, ydat, weight){
+    dy = ncol(ydat)
+    est = optim(param, cost_ESIM_weight, xdat = xdat, ydat = ydat, weight = weight)
+
+
+    bw = est$par[1]
+    theta = est$par[-1]
+    theta = sign(theta[1]) * SpheNormalize(theta)
+
+    index = xdat %*% theta
+    llmu = t(sapply(1:nrow(xdat), function(r_){
+        ll_LS_weight(txdat = index[-r_], tydat = ydat[-r_,], exdat = index[r_], bw, weight = weight[-r_])}))
+    mu = llmu[,1:dy]
+    mudev = llmu[,(dy+1):(2*dy)]
+
+    return(list(theta = theta, bw = bw, mu = mu, mudev = mudev))
+}
 
 ###########################################################
 # The implementation of ESIM with the exponential squared loss
@@ -236,6 +313,19 @@ cost_lambda_median <- function(lambda, delta, ydat, mu_fit){
     abs(delta - 1 + median(exp(-rowSums(e^2)/lambda)))
 }
 
+# Update all leave-one-out IRLS weight columns for fixed local fits.
+update_esl_psi <- function(index, ydat, mu, mudev, lambda, w){
+    n = nrow(ydat); d = ncol(ydat)
+
+    sapply(1:n, function(r_){
+        U = index[-r_] - index[r_]
+        fitted = matrix(mu[r_,], nrow = n-1, ncol = d, byrow = TRUE) +
+            U %o% mudev[r_,]
+        e = ydat[-r_,,drop = FALSE] - fitted
+        exp(-rowSums(e^2)/lambda) * w[-r_]
+    })
+}
+
 #' The weighted cost function for estimating \eqn{\theta} and the bandwidth, using the exponential squared loss.
 #'
 #' @param param A numeric vector of length (p+1), the initial value for the bandwidth and \eqn{\theta} (p dimensional vector).
@@ -298,7 +388,7 @@ esl_index_bw <- function(theta_init, bw_init, xdat, ydat, lambda, w = NA, abstol
     n = nrow(xdat); d = ncol(ydat)
     
     if (anyNA(w)) {w = rep(1, n)}
-    psi = matrix(1, nrow = n-1, ncol = n) 
+    psi = sapply(1:n, function(r_){w[-r_]})
     
     theta_update = sign(theta_init[1]) * SpheNormalize(theta_init) # normalize
     bw_update = bw_init
@@ -315,11 +405,8 @@ esl_index_bw <- function(theta_init, bw_init, xdat, ydat, lambda, w = NA, abstol
         mudev_update = llmu_mudev[,(d+1):(2*d)]
         
         # given lambda, mu_update, update weight
-        psi = sapply(1:n, function(r_){
-            U = matrix(rep((index_update[-r_] - index_update[r_]), d), ncol = d) # the difference of index  
-            e = ydat[-r_,] - mu_update[-r_,] - mudev_update[-r_,] * U # exponent
-            exp(- rowSums(e^2)/lambda) * w[-r_]
-        })
+        psi = update_esl_psi(index = index_update, ydat = ydat, mu = mu_update,
+                             mudev = mudev_update, lambda = lambda, w = w)
         
         # given psi, update theta and bw
         para_update = optim(c(bw_update, theta_update), cost_index_bw, 
@@ -344,6 +431,8 @@ esl_index_bw <- function(theta_init, bw_init, xdat, ydat, lambda, w = NA, abstol
     
     mu_update = mu_mudev[,1:d]
     mudev_update = mu_mudev[,(d+1):(2*d)]
+    psi = update_esl_psi(index = index_update, ydat = ydat, mu = mu_update,
+                         mudev = mudev_update, lambda = lambda, w = w)
     if (any(is.na(mu_update))) message("NA detected in mu.")
     return(list(theta = theta_update, bw = bw_update, 
                 mu = mu_update, mudev = mudev_update, psi = psi, iter = iter))
@@ -352,15 +441,16 @@ esl_index_bw <- function(theta_init, bw_init, xdat, ydat, lambda, w = NA, abstol
 
 #' Estimation of extrinsic single-index model using the exponential squared loss
 #' 
-#' The function takes initial values of the bandwidth \eqn{h} and parametric coefficients \eqn{\theta}, likely nonrobust, and estimates the tuning parameter \eqn{\lambda}.
-#' The estimation of \eqn{h} and \eqn{\theta} are implemented using \code{esl_index_bw}. 
-#' One step improvement is considered for the robust estimation of \eqn{\lambda}.
+#' The function implements Algorithm 1 by iteratively updating the tuning parameter
+#' \eqn{\lambda}, the leave-one-out IRLS weights, the index coefficient, and the bandwidth.
 #'  
 #' @param theta_init A numeric vector of length p, the initial value of \eqn{\theta}.
 #' @param bw_init A positive scalar, the initial value of the bandwidth.
 #' @param xdat An n by p matrix, the p-dimensional covariates.
 #' @param ydat An n by d matrix of response vectors, each row a d-dimensional unit vector.
 #' @param delta A scalar within (0,1) controling the robustness. See Section 5 of the paper for details.
+#' @param abstol A small positive scalar, the stopping criterion based on changes in the index coefficient. Default is 1e-4.
+#' @param maxiter An integer, the maximum number of Algorithm 1 iterations. Default is 200.
 #'
 #' @returns A list containing the following elements:
 #' \describe{
@@ -370,121 +460,70 @@ esl_index_bw <- function(theta_init, bw_init, xdat, ydat, lambda, w = NA, abstol
 #'   \item{mudev}{An n by d matrix of the estimated first derivatives of the local linear regression.}
 #'   \item{lambda}{The estimated tuning parameter \eqn{\lambda}.}
 #'   \item{psi}{An (n-1) by n matrix of weights used in the local linear regression.}
+#'   \item{iter}{Number of Algorithm 1 iterations used.}
 #' }
 #' 
 #' @export
 #'
 #' @examples
-esl_est <- function(theta_init, bw_init, xdat, ydat, delta){
+esl_est <- function(theta_init, bw_init, xdat, ydat, delta, abstol=1e-4, maxiter=200){
+    dist_ = 1e5
+    iter = 0
     n = nrow(ydat); d = ncol(ydat)
-    
-    theta_init = sign(theta_init[1]) * SpheNormalize(theta_init) # normalize
-    
-    # use the ESIM with least squares to obtain the muhat
-    U_init = xdat %*% theta_init
-    llmu_mudev = t(sapply(1:n, function(r_){
-        ll_LS(txdat = U_init[-r_], tydat = ydat[-r_,], exdat = U_init[r_], bw = bw_init)})) # n * 2d
-    mu_init = llmu_mudev[,1:d]
-    
-    # given mu_init (nonrobust), update the tuning parameter lambda
-    lambda_init = optimise(cost_lambda_median, lower = 1e-5, upper = 3,
-                            delta = delta, ydat = ydat, mu_fit = mu_init, maximum = FALSE)$minimum
-    # given lambda_init, update theta and bw
-    result = esl_index_bw(theta_init = theta_init, bw_init = bw_init,
-                          xdat = xdat, ydat = ydat, lambda = lambda_init)
-    
-    theta_update = result$theta
-    bw_update = result$bw
-    mu_update = result$mu
-    
-    # one step improvement
-    lambda_update = optimise(cost_lambda_median, lower = 1e-5, upper = 3,
-                             delta = delta, ydat = ydat, mu_fit = mu_update, maximum = FALSE)$minimum
-    result_update = esl_index_bw(theta_init = theta_update, bw_init = bw_update,
-                          xdat = xdat, ydat = ydat, lambda = lambda_update)
-    
-    list(theta = result_update$theta, bw = result_update$bw, mu = result_update$mu, mudev = result_update$mudev,
-         lambda = lambda_update, psi = result_update$psi)
-}
 
-#' Weighted cost function of the extrinsic single-index model using least squares.
-#'
-#' @param param A numeric vector of length (p+1), the first component is the bandwidth and the remaining components are the parameter coefficients.
-#' @param xdat An n by p matrix, the p-dimensional covariates.
-#' @param ydat An n by d matrix of response vectors, each row a d-dimensional unit vector.
-#' @param weight A numeric vector of length n, the observation weights for the weighted least squares objective.
-#'
-#' @returns Scalar, the weighted loss value.
-cost_ESIM_weight<- function(param, xdat, ydat, weight){
-    MaxPanelty = .Machine$double.xmax
-    K = dnorm # kernel function
-    dx = ncol(xdat); dy = ncol(ydat)
-    n = nrow(xdat)
-    
-    if(dx != (length(param)-1)){
-        stop("xdat has different dimensions with param.")
+    theta_update = sign(theta_init[1]) * SpheNormalize(theta_init) # normalize
+    bw_update = bw_init
+    w = rep(1, n)
+    psi = matrix(1, nrow = n-1, ncol = n)
+
+    while (dist_ >= abstol && iter < maxiter) {
+        theta_old = theta_update
+
+        # Step 1: update leave-one-out local fits and lambda
+        index_update = xdat %*% theta_update
+        llmu_mudev = t(sapply(1:n, function(r_){
+            ll_ESL(txdat = index_update[-r_], tydat = ydat[-r_,], exdat = index_update[r_],
+                   bw = bw_update, weight = psi[,r_])
+        }))
+        mu_update = llmu_mudev[,1:d]
+        mudev_update = llmu_mudev[,(d+1):(2*d)]
+        lambda_update = optimise(cost_lambda_median, lower = 1e-5, upper = 1e5, tol = 1e-10,
+                                 delta = delta, ydat = ydat, mu_fit = mu_update)$minimum
+
+        # Step 2: update the leave-one-out IRLS weights
+        psi = update_esl_psi(index = index_update, ydat = ydat, mu = mu_update,
+                             mudev = mudev_update, lambda = lambda_update, w = w)
+
+        # Step 3: update theta and bandwidth for fixed lambda and IRLS weights
+        para_update = optim(c(bw_update, theta_update), cost_index_bw,
+                            xdat = xdat, ydat = ydat, lambda = lambda_update, weight = psi)
+        theta_update = para_update$par[-1]
+        theta_update = sign(theta_update[1]) * SpheNormalize(theta_update)
+        bw_update = para_update$par[1]
+
+        dist_ = SpheGeoDist(theta_update, theta_old)
+        iter = iter + 1
     }
-    
-    bw = param[1] # bandwidth
-    
-    theta = param[-1]
-    theta = sign(theta[1]) * SpheNormalize(theta) # parametric coefficients
-    
-    index_ = xdat %*% theta
-    
-    bw_range = SetBwRange(xin = index_, xout = index_, kernel_type = "gauss")# avoid small or negative bandwidth
-    if(bw>bw_range$max || bw < bw_range$min){return(.Machine$double.xmax)}
-    
-    # leave one out local linear of mu and first derivative
-    llmu = sapply(1:n, function(r_){
-        ll_LS_weight(txdat = index_[-r_], tydat = ydat[-r_,], exdat = index_[r_], bw, weight = weight[-r_])
-    })
-    llmu = t(llmu)[,1:dy]
-    # objective value
-    if (any(is.nan(llmu))) {return(.Machine$double.xmax)}
-    sum(weight * (ydat - llmu)^2)
-    
+    if (iter == maxiter) message("ESL fail to converge.")
+
+    # Synchronize Step 1 and Step 2 at the final theta and bandwidth.
+    index_update = xdat %*% theta_update
+    llmu_mudev = t(sapply(1:n, function(r_){
+        ll_ESL(txdat = index_update[-r_], tydat = ydat[-r_,], exdat = index_update[r_],
+               bw = bw_update, weight = psi[,r_])
+    }))
+    mu_update = llmu_mudev[,1:d]
+    mudev_update = llmu_mudev[,(d+1):(2*d)]
+    lambda_update = optimise(cost_lambda_median, lower = 1e-5, upper = 1e5, tol = 1e-10,
+                             delta = delta, ydat = ydat, mu_fit = mu_update)$minimum
+    psi = update_esl_psi(index = index_update, ydat = ydat, mu = mu_update,
+                         mudev = mudev_update, lambda = lambda_update, w = w)
+
+    list(theta = theta_update, bw = bw_update, mu = mu_update, mudev = mudev_update,
+         lambda = lambda_update, psi = psi, iter = iter)
 }
 
-#' Weighted estimation of the extrinsic single-index model using least squares.
-#'
-#' This function estimates the parameter coefficients \eqn{\theta} and the bandwidth
-#' for an extrinsic single-index model using a weighted leave-one-out local linear regression
-#' with the least squares loss.
-#'
-#' @param param A numeric of length (p+1). The first component is the initial value of the bandwidth and the remaining components are the initial value of the parametric coefficients.
-#' @param xdat An n by p matrix, the p-dimensional covariates.
-#' @param ydat An n by d matrix of response vectors, each row a d-dimensional unit vector.
-#' @param weight A numeric vector of length n, the observation weights for the weighted least squares objective.
-#'
-#' @returns A list containing:
-#' \describe{
-#'   \item{theta}{Estimated parameter coefficients, normalized to have unit length and a positive leading component.}
-#'   \item{bw}{Estimated bandwidth for local linear regression.}
-#'   \item{mu}{An n by d matrix of leave-one-out weighted local linear regression estimates of the response.}
-#'   \item{mudev}{An n by d matrix of leave-one-out estimates of the derivative of the regression function.}
-#' }
-#'
-#' @export
-#'
-#' @examples
-ls_est_weight <- function(param, xdat, ydat, weight){
-    dy = ncol(ydat)
-    est = optim(param, cost_ESIM_weight, xdat = xdat, ydat = ydat, weight = weight)
-    
-    
-    bw = est$par[1]
-    theta = est$par[-1]
-    theta = sign(theta[1]) * SpheNormalize(theta)
-    
-    index = xdat %*% theta
-    llmu = t(sapply(1:nrow(xdat), function(r_){
-        ll_LS_weight(txdat = index[-r_], tydat = ydat[-r_,], exdat = index[r_], bw, weight = weight[-r_])}))
-    mu = llmu[,1:dy]
-    mudev = llmu[,(dy+1):(2*dy)]
-    
-    return(list(theta = theta, bw = bw, mu = mu, mudev = mudev))
-}
+
 
 # LOO local linear regression to determine the optimal bandwidth
 bwConExp <- function(xdat, ydat){
